@@ -14,7 +14,7 @@ CONTENT_TYPE_MAP = {
 }
 
 def parse_headers(headers_str: str) -> Dict[str, str]:
-    """解析HTTP头部字符串为字典"""
+    """解析 HTTP 头部字符串为字典"""
     headers = {}
     for line in headers_str.split("\n"):
         if ":" in line:
@@ -32,21 +32,15 @@ def save_resource(
 ) -> Optional[Tuple[str, str]]:
     """保存资源文件到指定目录"""
     try:
-        # 提取原始文件名并去除已有扩展名
         original_name = os.path.basename(content_location)
         base_name = os.path.splitext(original_name)[0]
-        
-        # 获取正确扩展名
-        extension = CONTENT_TYPE_MAP.get(
-            content_type, 
-            content_type.split("/")[-1].split("+")[-1]
-        )
+        extension = CONTENT_TYPE_MAP.get(content_type, content_type.split("/")[-1].split("+")[-1])
 
         os.makedirs(resource_dir, exist_ok=True)
         filename = f"{base_name}.{extension}"
         file_path = os.path.join(resource_dir, filename)
 
-        # 处理不同编码格式
+        # 处理编码
         content = base64.b64decode(data) if encoding == "base64" else data.encode("utf-8")
 
         with open(file_path, "wb") as f:
@@ -54,12 +48,12 @@ def save_resource(
 
         if progress_callback:
             progress_callback(1)  # 每保存一个资源，更新进度条
-        
+
         return (content_location, file_path)
     except Exception as e:
         print(f"保存资源失败 {content_location}: {str(e)}")
         return None
-    
+
 class MHTProcessor:
     def __init__(self, max_workers: int = 4):
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -67,15 +61,13 @@ class MHTProcessor:
     def empty_msg(self, soup: BeautifulSoup) -> None:
         """处理空白记录"""
         for div in soup.find_all("div", style="padding-left:20px;"):
-            # 先排除有图像的消息
-            if div.find("img"):
+            if div.find("img"):  # 跳过有图片的 div
                 continue
 
-            if not div.get_text(strip=True):
+            if not div.get_text(strip=True):  # 如果是空白消息
                 new_div = soup.new_tag("div", **{"style": "padding-left:20px;"})
                 new_font = soup.new_tag("font", style="font-size:10pt;font-family:'宋体','MS Sans Serif',sans-serif;", color="000000")
                 new_font.string = "[不支持导出的消息类型]"
-
                 new_div.append(new_font)
                 div.insert_before(new_div)
                 div.decompose()
@@ -89,7 +81,8 @@ class MHTProcessor:
         counter = 1
         
         for element in soup.find_all(style=True):
-            if not (original_style := element.get("style", "").strip()):
+            original_style = element.get("style", "").strip()
+            if not original_style:
                 continue
 
             if original_style not in style_map:
@@ -104,36 +97,22 @@ class MHTProcessor:
 
         return "\n".join(css_rules)
 
-    def update_references(
-        self,
-        soup: BeautifulSoup,
-        resource_map: Dict[str, str],
-        output_path: str
-    ) -> None:
+    def update_references(self, soup: BeautifulSoup, resource_map: Dict[str, str], output_path: str) -> None:
         """更新 HTML 资源引用路径"""
         for tag in soup.find_all(["img", "link", "script"]):
             attr = "src" if tag.name == "img" else "href"
             if resource_path := resource_map.get(tag.get(attr, "")):
-                relative_path = os.path.relpath(
-                    resource_path,
-                    start=os.path.dirname(output_path)
-                )
+                relative_path = os.path.relpath(resource_path, start=os.path.dirname(output_path))
                 tag[attr] = relative_path
         print("HTML 中的资源引用路径已成功更新。")
 
-    def process(
-        self,
-        mht_path: str,
-        output_path: str,
-        resource_dir: str = "images"
-    ) -> bool:
+    def process(self, mht_path: str, output_path: str, resource_dir: str = "images") -> bool:
         """主处理流程"""
         try:
             print(f"正在读取 MHT 文件：{mht_path}...")
             with open(mht_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # 解析 MHT 结构
             if not (boundary_match := re.search(r'boundary="([^"]+)"', content)):
                 raise ValueError("无效的 MHT 文件格式：缺少 boundary 声明")
             
@@ -155,16 +134,8 @@ class MHTProcessor:
 
             futures = []
             resource_map = {}
-            resource_dir = os.path.join(os.path.dirname(output_path), resource_dir)
-
-            total_resources = 0
-            for part in parts:
-                if "Content-Location:" not in part:
-                    continue
-                headers_str, _, body = part.partition("\n\n")
-                headers = parse_headers(headers_str)
-                if headers.get("content-location"):
-                    total_resources += 1  # 统计资源数量
+            # 计算资源数量
+            total_resources = sum(1 for part in parts if "Content-Location:" in part)
 
             with tqdm(total=total_resources, desc="资源转存进度", ncols=100) as progress_bar:
                 for part in parts:
@@ -188,7 +159,7 @@ class MHTProcessor:
                             body.strip(),
                             encoding,
                             resource_dir,
-                            progress_bar.update
+                            progress_bar.update  # 更新进度条
                         )
                     )
 
@@ -207,7 +178,6 @@ class MHTProcessor:
                     soup.html.insert(0, soup.new_tag("head")).append(style_tag)
 
             with open(output_path, "w", encoding="utf-8") as f:
-                # f.write(soup.prettify())
                 f.write(str(soup))
 
             print(f"转换成功: {output_path}")
